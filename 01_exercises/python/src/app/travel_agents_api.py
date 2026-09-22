@@ -18,6 +18,10 @@ import traceback
 
 import logging
 
+from src.app.optimization_api import router as optimization_router
+from src.app.services import optimization
+from src.app.services.azure_open_ai import AZURE_OPENAI_DEPLOYMENT
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -372,11 +376,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # Module 07 — mount the optimization / analytics REST surface
-from src.app.optimization_api import router as optimization_router
-from src.app.services import optimization
-from src.app.services.azure_open_ai import AZURE_OPENAI_DEPLOYMENT
 app.include_router(optimization_router)
 
 # ============================================================================
@@ -777,6 +777,49 @@ def store_debug_log_from_response(sessionId: str, tenantId: str, userId: str, re
             agent_path=agent_path,
             handoff_count=handoff_count,
             debug_log_id=debug_log_id,
+        )
+        # Module 07 — record this turn for optimization analytics.
+        # Module 08: superseded by record_optimization_turn_for_message below, which
+        # records the real complexity tier. Left commented to avoid double-counting.
+        # optimization.record_optimization_turn(
+        #     tenant_id=tenantId, user_id=userId, session_id=sessionId,
+        #     complexity_tier="default", deployment=AZURE_OPENAI_DEPLOYMENT,
+        #     usage={"input_tokens": input_tokens, "output_tokens": output_tokens,
+        #            "total_tokens": total_tokens, "cached_tokens": cached_tokens},
+        #     model_name=model_name,
+        # )
+
+        # Module 07 (Hook 3) — capture per-AGENT node-grain, not just the turn total.
+        # response_data is a list of {node: {"messages": [...]}} updates, so each entry
+        # already isolates one agent's model call(s). Sum each agent's usage into a node
+        # record instead of collapsing them into a single turn total.
+        node_execs = []
+        node_deployment, _ = optimization.select_deployment_for_turn(
+            [{"role": "user", "content": user_message_text}]
+        )
+        for entry in response_data:
+            for node_agent, node_details in entry.items():
+                n_in = n_out = n_total = n_cached = 0
+                n_model = model_name
+                for msg in (node_details.get("messages", []) if isinstance(node_details, dict) else []):
+                    um = getattr(msg, "usage_metadata", None) or {}
+                    if not um:
+                        continue
+                    n_in += um.get("input_tokens", 0) or 0
+                    n_out += um.get("output_tokens", 0) or 0
+                    n_total += um.get("total_tokens", 0) or 0
+                    n_cached += (um.get("input_token_details") or {}).get("cache_read", 0) or 0
+                    n_model = (getattr(msg, "response_metadata", {}) or {}).get("model_name", n_model)
+                if n_total or n_in or n_out:
+                    node_execs.append({
+                        "seq": len(node_execs), "agent": node_agent,
+                        "model_deployment": node_deployment, "model_name": n_model,
+                        "input_tokens": n_in, "output_tokens": n_out,
+                        "total_tokens": n_total, "cached_tokens": n_cached,
+                    })
+        optimization.record_node_executions(
+            tenant_id=tenantId, user_id=userId, session_id=sessionId,
+            turn_id=debug_log_id, node_execs=node_execs,
         )
 
         # Module 07 — record this turn for optimization analytics.

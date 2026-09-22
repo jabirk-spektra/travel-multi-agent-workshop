@@ -67,9 +67,9 @@ if (-not (Test-Path $simPy)) {
 # --- Resolve the deployed workshop tree (holds .azure + the venv) -------------
 if (-not $WorkshopRoot) {
     $repoRoot = Resolve-Path (Join-Path $scriptDir '..\..')
-    $candidates = @('02_completed', '01_exercises') |
+    $candidates = @(@('02_completed', '01_exercises') |
         ForEach-Object { Join-Path $repoRoot $_ } |
-        Where-Object { Test-Path (Join-Path $_ '.azure') }
+        Where-Object { Test-Path (Join-Path $_ '.azure') })
     if ($candidates.Count -eq 0) {
         Fail "No azd environment found. Run 'azd up' in your workshop folder first (or pass -WorkshopRoot)."
     }

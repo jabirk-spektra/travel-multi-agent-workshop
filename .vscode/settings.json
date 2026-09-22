@@ -1,0 +1,19 @@
+{
+  // Use the workshop virtualenv created by `azd up` so third-party imports
+  // (langchain, langgraph, langsmith, azure-cosmos, ...) resolve.
+  "python.defaultInterpreterPath": "${workspaceFolder}/01_exercises/.venv-travel/Scripts/python.exe",
+
+  // The app is imported as `src.app.*`, which only resolves with
+  // 01_exercises/python on the path (that is the directory uvicorn runs from).
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/01_exercises/python",
+    "${workspaceFolder}/02_completed/python"
+  ],
+  "python.autoComplete.extraPaths": [
+    "${workspaceFolder}/01_exercises/python",
+    "${workspaceFolder}/02_completed/python"
+  ],
+
+  "python.analysis.typeCheckingMode": "basic",
+  "python.terminal.activateEnvironment": true
+}

@@ -285,30 +285,25 @@ You should see **(.venv-travel)** appear in your terminal prompt.
 > Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 > ```
 
-### Step 2: Navigate to the Source Directory
+### Step 2: Navigate to the Python Directory
 
-**macOS/Linux:**
 ```bash
-cd python/src/app
-```
-
-**Windows (PowerShell):**
-```powershell
-cd python\src\app
+cd python
 ```
 
 ### Step 3: Start the API Server with Uvicorn
 
-Run the API server using Uvicorn:
+Run the API server using Uvicorn from the `python` directory, with the full module path
+(`src.app.travel_agents_api`) — the app's imports are package-qualified (`from src.app...`):
 
 ```bash
-uvicorn travel_agents_api:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.app.travel_agents_api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Alternatively, you can run it directly with Python:
 
 ```bash
-python travel_agents_api.py
+python src/app/travel_agents_api.py
 ```
 
 ### Expected Output

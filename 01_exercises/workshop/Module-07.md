@@ -100,7 +100,7 @@ Both are provided; the Cosmos containers they use (`OptimizationTurns`, `Optimiz
 
 Open `01_exercises/python/src/app/travel_agents_api.py`. You'll add two things here — the **imports** (top of the file) and the **router mount** (right after the app is configured).
 
-**1a — imports.** Scroll to the **import section at the top of the file** (where the other `from src.app...` lines live). Copy the four lines below and paste them at the end of that import block. Module 08 will reuse the `optimization` service; `AZURE_OPENAI_DEPLOYMENT` identifies the fixed baseline model recorded in this module.
+**1a — imports.** Scroll to the import section near the top of the file and find the other `from src.app...` lines. Copy the four lines below and paste them **with those lines, below the `sys.path.insert(...)` block** — `from src.app...` imports only resolve after that has run. If these lines are already in the file, skip this step. Module 08 will reuse the `optimization` service; `AZURE_OPENAI_DEPLOYMENT` identifies the fixed baseline model recorded in this module.
 
 ```python
 # Module 07 — optimization / analytics

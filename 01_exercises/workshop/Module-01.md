@@ -988,16 +988,16 @@ If it isn't running, start it now:
 ```bash
 cd ~/travel-multi-agent-workshop/01_exercises
 source .venv-travel/bin/activate
-cd python/src/app
-uvicorn travel_agents_api:app --reload --host 0.0.0.0 --port 8000
+cd python
+uvicorn src.app.travel_agents_api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 **Windows (PowerShell):**
 ```powershell
 cd ~\travel-multi-agent-workshop\01_exercises
 .\.venv-travel\Scripts\Activate.ps1
-cd python\src\app
-uvicorn travel_agents_api:app --reload --host 0.0.0.0 --port 8000
+cd python
+uvicorn src.app.travel_agents_api:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### Step 3: Verify the Frontend is running

@@ -15,3 +15,6 @@ __pycache__/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# azd-generated validation parameter files
+**/infra/validation-*.bicepparam

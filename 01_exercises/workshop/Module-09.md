@@ -90,6 +90,11 @@ The script auto-detects the workshop folder you deployed (e.g. `02_completed` or
 > plane, this is usually a tenant/region availability mismatch rather than normal propagation.
 > Set `FABRIC_CAPACITY_LOCATION` in the `azd` environment to a Fabric-supported region for your
 > tenant, reprovision the capacity, and retry. The provisioning error prints this recovery path.
+>
+> If `azd up` fails with **`Location needs to match the PowerBI cluster location`**, your tenant only
+> allows Fabric capacities in its Power BI home region. In the Fabric portal open **?** → **About** and
+> read *Your data is stored in*, then run `azd env set FABRIC_CAPACITY_LOCATION <that region>`
+> (e.g. `eastus2`) and rerun `azd up`.
 
 > Uploading the **completed** notebook (for the `02_completed` demo) instead of the learner version? Run `.\Provision-Fabric.ps1 -Solution`.
 

@@ -26,6 +26,13 @@ region that has Fabric capacity available to you.
 > never appear in the Fabric control plane (`/v1/capacities`), so it can't be used. The provisioner
 > now stops with this diagnosis. Set `FABRIC_CAPACITY_LOCATION` to a Fabric-supported region for the
 > tenant, reprovision the capacity, and retry.
+>
+> **`BadRequest: Location needs to match the PowerBI cluster location`:** some tenants (commonly
+> lab/trial tenants) only allow Fabric capacities in the tenant's **Power BI home region**. Find it at
+> [app.fabric.microsoft.com](https://app.fabric.microsoft.com) → **?** (Help) → **About** → *Your data
+> is stored in*, map it to the Azure region name (e.g. *East US 2* → `eastus2`), then
+> `azd env set FABRIC_CAPACITY_LOCATION <region>` and rerun `azd up`. To skip analytics entirely,
+> `azd env set DEPLOY_ANALYTICS false`.
 
 - **Capacity (current):** `fabf2tx5x7js4bwi` — **F2**, **West Central US**, Fabric id
   `a04c5461-c9d4-4eb8-b67e-bb76fc302f2d`, admin `mjbrown@microsoft.com`. Deployed by

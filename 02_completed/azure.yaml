@@ -70,6 +70,9 @@ hooks:
             echo ""
             echo "Analytics is enabled (deployAnalytics=true) -> a Fabric F2 capacity will be deployed."
             echo "Enter an Azure region that has Fabric capacity available on your tenant."
+            echo "Some tenants (e.g. lab/trial tenants) only allow the Power BI HOME region - if azd fails with"
+            echo "'Location needs to match the PowerBI cluster location', find it at app.fabric.microsoft.com ->"
+            echo "? (Help) -> About -> 'Your data is stored in', then: azd env set FABRIC_CAPACITY_LOCATION <region>"
             printf "Fabric capacity region [westcentralus]: "
             read FAB_REGION
             if [ -z "$FAB_REGION" ]; then FAB_REGION="westcentralus"; fi
@@ -108,6 +111,9 @@ hooks:
             Write-Host ""
             Write-Host "Analytics is enabled (deployAnalytics=true) -> a Fabric F2 capacity will be deployed."
             Write-Host "Enter an Azure region that has Fabric capacity available on your tenant."
+            Write-Host "Some tenants (e.g. lab/trial tenants) only allow the Power BI HOME region - if azd fails with"
+            Write-Host "'Location needs to match the PowerBI cluster location', find it at app.fabric.microsoft.com ->"
+            Write-Host "? (Help) -> About -> 'Your data is stored in', then: azd env set FABRIC_CAPACITY_LOCATION <region>"
             $fabRegion = Read-Host "Fabric capacity region [westcentralus]"
             if (-not $fabRegion -or $fabRegion.Trim() -eq "") { $fabRegion = "westcentralus" }
             azd env set FABRIC_CAPACITY_LOCATION $fabRegion.Trim()

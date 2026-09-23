@@ -18,6 +18,11 @@ import traceback
 
 import logging
 
+# Add project root to path
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from src.app.optimization_api import router as optimization_router
 from src.app.services import optimization
 from src.app.services.azure_open_ai import AZURE_OPENAI_DEPLOYMENT
@@ -40,11 +45,6 @@ for noisy in (
     "langsmith.client",
 ):
     logging.getLogger(noisy).setLevel(logging.WARNING)
-
-# Add project root to path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
 # Load environment variables with explicit path
 current_file = Path(__file__)

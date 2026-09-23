@@ -60,6 +60,9 @@ hooks:
         else
           echo "OWNER_EMAIL already set to: $EXISTING_OWNER"
         fi
+        # A previous deployment that was deleted without --purge leaves a soft-deleted Foundry account
+        # with the same name, which blocks redeploy (FlagMustBeSetForRestore). Purge it first.
+        sh ../scripts/purge_soft_deleted.sh
         # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Some tenants only
         # accept Fabric capacities in their Power BI home region, so detect a usable region by probing
         # (see analytics/fabric/README.md). Override with: azd env set FABRIC_CAPACITY_LOCATION <region>
@@ -83,6 +86,9 @@ hooks:
           Write-Host "Could not get current user, setting default"
           azd env set OWNER_EMAIL "user@example.com"
         }
+        # A previous deployment that was deleted without --purge leaves a soft-deleted Foundry account
+        # with the same name, which blocks redeploy (FlagMustBeSetForRestore). Purge it first.
+        & ../scripts/Purge-SoftDeleted.ps1
         # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Some tenants only
         # accept Fabric capacities in their Power BI home region, so detect a usable region by probing
         # (see analytics/fabric/README.md). Override with: azd env set FABRIC_CAPACITY_LOCATION <region>

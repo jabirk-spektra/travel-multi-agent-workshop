@@ -46,9 +46,16 @@ for REGION in $CANDIDATES; do
   PROBE="fabprobe$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')"
   BODY="{\"location\":\"$REGION\",\"sku\":{\"name\":\"F2\",\"tier\":\"Fabric\"},\"properties\":{\"administration\":{\"members\":[\"$ADMIN\"]}}}"
   if OUT=$(az rest --method put --url "$BASE/$PROBE?api-version=2023-11-01" --body "$BODY" 2>&1); then
+    # Accepted the request -- make sure it actually provisions before trusting the region.
+    STATE=""; I=0
+    while [ $I -lt 36 ] && [ "$STATE" != "Succeeded" ] && [ "$STATE" != "Failed" ]; do
+      sleep 5; I=$((I + 1))
+      STATE=$(az rest --method get --url "$BASE/$PROBE?api-version=2023-11-01" --query properties.provisioningState -o tsv 2>/dev/null | tr -d '\r')
+    done
     az resource delete -g "$RG_NAME" -n "$PROBE" --resource-type Microsoft.Fabric/capacities >/dev/null 2>&1
-    FOUND="$REGION"
-    break
+    if [ "$STATE" = "Succeeded" ]; then FOUND="$REGION"; break; fi
+    echo "  $REGION -> accepted but did not provision (state: $STATE)"
+    continue
   fi
   REASON=$(printf '%s' "$OUT" | grep -m1 .)
   if ! printf '%s' "$OUT" | grep -qiE 'location|region|LocationNotAvailable|NoRegisteredProviderFound'; then

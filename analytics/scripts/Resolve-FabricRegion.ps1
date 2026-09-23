@@ -67,9 +67,16 @@ foreach ($region in $candidates) {
         ConvertTo-Json -Depth 5 | Set-Content -Path $bodyFile -Encoding utf8
     $out = az rest --method put --url "$base/${probe}?api-version=2023-11-01" --body "@$bodyFile" 2>&1
     if ($LASTEXITCODE -eq 0) {
+        # Accepted the request -- make sure it actually provisions before trusting the region.
+        $state = ''
+        for ($i = 0; $i -lt 36 -and $state -notin 'Succeeded', 'Failed'; $i++) {
+            Start-Sleep -Seconds 5
+            $state = az rest --method get --url "$base/${probe}?api-version=2023-11-01" --query properties.provisioningState -o tsv 2>$null
+        }
         az resource delete -g $rgName -n $probe --resource-type Microsoft.Fabric/capacities 2>$null
-        $found = $region
-        break
+        if ($state -eq 'Succeeded') { $found = $region; break }
+        Write-Host "  $region -> accepted but did not provision (state: $state)"
+        continue
     }
     $reason = ("$out" -split "`n" | Where-Object { $_ -match '\S' } | Select-Object -First 1)
     if ("$out" -notmatch 'location|region|LocationNotAvailable|NoRegisteredProviderFound') {

@@ -12,8 +12,12 @@ the **Azure Cosmos ARM API**. Most of Phase 1 is now scripted end-to-end in
 
 ## Fabric capacity region — flexible by design
 
-`azd up` prompts for a separate `FABRIC_CAPACITY_LOCATION` (default `westcentralus`) so you can
-place the Fabric capacity **wherever it best suits you**, independently of the app's own region.
+`azd up` **auto-detects** `FABRIC_CAPACITY_LOCATION` in the preprovision hook
+([`Resolve-FabricRegion.ps1`](../scripts/Resolve-FabricRegion.ps1) /
+[`resolve_fabric_region.sh`](../scripts/resolve_fabric_region.sh)): it creates a throwaway F2 capacity
+in each candidate region (your app region first), keeps the first one the tenant accepts, and
+deletes the probe immediately. The result is saved and reused on later runs. To pin a region
+yourself, `azd env set FABRIC_CAPACITY_LOCATION <region>`; a pinned region is tried first.
 Fabric capacity availability varies by Azure region and can be governed per-tenant, so the region
 you deploy the app into isn't necessarily where you want — or are allowed — to run Fabric. Pick any
 region that has Fabric capacity available to you.

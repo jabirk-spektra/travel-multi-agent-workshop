@@ -60,28 +60,10 @@ hooks:
         else
           echo "OWNER_EMAIL already set to: $EXISTING_OWNER"
         fi
-        # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Fabric
-        # capacity availability varies by region and can be governed per-tenant, so we let
-        # you place it independently of the app region (see analytics/fabric/README.md).
-        DEPLOY_ANALYTICS=$(azd env get-value DEPLOY_ANALYTICS 2>/dev/null || echo "true")
-        if [ "$DEPLOY_ANALYTICS" != "false" ]; then
-          EXISTING_FAB=$(azd env get-value FABRIC_CAPACITY_LOCATION 2>/dev/null || echo "")
-          if [ -z "$EXISTING_FAB" ]; then
-            echo ""
-            echo "Analytics is enabled (deployAnalytics=true) -> a Fabric F2 capacity will be deployed."
-            echo "Enter an Azure region that has Fabric capacity available on your tenant."
-            echo "Some tenants (e.g. lab/trial tenants) only allow the Power BI HOME region - if azd fails with"
-            echo "'Location needs to match the PowerBI cluster location', find it at app.fabric.microsoft.com ->"
-            echo "? (Help) -> About -> 'Your data is stored in', then: azd env set FABRIC_CAPACITY_LOCATION <region>"
-            printf "Fabric capacity region [westcentralus]: "
-            read FAB_REGION
-            if [ -z "$FAB_REGION" ]; then FAB_REGION="westcentralus"; fi
-            azd env set FABRIC_CAPACITY_LOCATION "$FAB_REGION"
-            echo "Fabric capacity region set to: $FAB_REGION"
-          else
-            echo "FABRIC_CAPACITY_LOCATION already set to: $EXISTING_FAB"
-          fi
-        fi
+        # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Some tenants only
+        # accept Fabric capacities in their Power BI home region, so detect a usable region by probing
+        # (see analytics/fabric/README.md). Override with: azd env set FABRIC_CAPACITY_LOCATION <region>
+        sh ../analytics/scripts/resolve_fabric_region.sh
     windows:
       shell: pwsh
       interactive: true
@@ -101,27 +83,10 @@ hooks:
           Write-Host "Could not get current user, setting default"
           azd env set OWNER_EMAIL "user@example.com"
         }
-        # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Fabric
-        # capacity availability varies by region and can be governed per-tenant, so prompt
-        # for the Fabric region independently of the app region.
-        $deployAnalytics = (azd env get-value DEPLOY_ANALYTICS 2>$null)
-        if ($deployAnalytics -ne "false") {
-          $existingFab = (azd env get-value FABRIC_CAPACITY_LOCATION 2>$null)
-          if (-not $existingFab -or $existingFab.Trim() -eq "") {
-            Write-Host ""
-            Write-Host "Analytics is enabled (deployAnalytics=true) -> a Fabric F2 capacity will be deployed."
-            Write-Host "Enter an Azure region that has Fabric capacity available on your tenant."
-            Write-Host "Some tenants (e.g. lab/trial tenants) only allow the Power BI HOME region - if azd fails with"
-            Write-Host "'Location needs to match the PowerBI cluster location', find it at app.fabric.microsoft.com ->"
-            Write-Host "? (Help) -> About -> 'Your data is stored in', then: azd env set FABRIC_CAPACITY_LOCATION <region>"
-            $fabRegion = Read-Host "Fabric capacity region [westcentralus]"
-            if (-not $fabRegion -or $fabRegion.Trim() -eq "") { $fabRegion = "westcentralus" }
-            azd env set FABRIC_CAPACITY_LOCATION $fabRegion.Trim()
-            Write-Host "Fabric capacity region set to: $($fabRegion.Trim())"
-          } else {
-            Write-Host "FABRIC_CAPACITY_LOCATION already set to: $existingFab"
-          }
-        }
+        # When analytics is enabled, a Microsoft Fabric F2 capacity is deployed. Some tenants only
+        # accept Fabric capacities in their Power BI home region, so detect a usable region by probing
+        # (see analytics/fabric/README.md). Override with: azd env set FABRIC_CAPACITY_LOCATION <region>
+        & ../analytics/scripts/Resolve-FabricRegion.ps1
   postprovision:
     posix:
       shell: sh

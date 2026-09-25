@@ -70,7 +70,7 @@ from src.app.services.azure_cosmos_db import (
     create_user, get_all_users, get_user_by_id,
     store_debug_log, get_debug_log, query_debug_logs
 )
-from src.app.travel_agents import setup_agents, build_agent_graph, cleanup_persistent_session
+from src.app.travel_agents import setup_agents, build_agent_graph, cleanup_persistent_session, _current_user_preference_vector
 from src.app.services.agent_memory import get_memory_client
 
 # Load environment variables

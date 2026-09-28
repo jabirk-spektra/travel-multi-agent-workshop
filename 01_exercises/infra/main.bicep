@@ -126,7 +126,7 @@ module openAi './shared/openai.bicep' = {
 var deployments = [
   {
     name: 'gpt-5.1'
-    skuCapacity: 30
+    skuCapacity: 100
 	skuName: 'GlobalStandard'
     modelName: 'gpt-5.1'
     modelVersion: '2025-11-13'

@@ -68,6 +68,22 @@ COSMOS_DATA_CONTRIBUTOR = "00000000-0000-0000-0000-000000000002"
 # `memories` powers the Memory Intelligence report page (salience / health / supersession).
 MIRROR_TABLES = ["OptimizationTurns", "NodeExecutions", "Trips", "OptimizationPolicies", "OptimizationGovernance", "Configuration", "Messages", "ApiEvents", "OptimizationInsights", "memories"]
 
+# OptimizationInsights is the one mirrored container that is still empty when the report
+# is deployed (the Module 09 notebook fills it later). An empty Cosmos container mirrors
+# as a table with only _rid/_ts, and Power BI caches that 2-column schema for the
+# DirectQuery partition, so every later query fails with "Invalid column name 'type'".
+# We upsert one placeholder document carrying every column the model reads, so the
+# mirrored table has its full schema before Power BI first looks at it. Every report
+# measure/visual and every app query filters on `type`, so this row is never shown.
+INSIGHTS_CONTAINER = "OptimizationInsights"
+INSIGHTS_MODEL_TABLE_FILE = os.path.join("definition", "tables", "TravelAssistant OptimizationInsights.tmdl")
+SCHEMA_SEED_ID = "schema-seed::powerbi"
+SCHEMA_SEED_TENANT = "_schema_seed"
+SCHEMA_SEED_TYPE = "schema_seed"
+# Model columns that hold JSON objects in Cosmos (the mirror stores them as varchar);
+# seed them as objects so the placeholder matches the notebook's real rows.
+SCHEMA_SEED_OBJECT_COLUMNS = {"card"}
+
 
 # --------------------------------------------------------------------------- creds
 class Tokens:
@@ -556,6 +572,120 @@ def get_mirror_sql_endpoint(tok: Tokens, ws_id: str, mid: str) -> str:
     return (props.get("sqlEndpointProperties", {}) or {}).get("connectionString", "")
 
 
+def _insights_seed_document(semantic_model_source: str) -> dict[str, Any]:
+    """Build the OptimizationInsights placeholder from the model's own column list, so it
+    stays in sync with the TMDL: numbers -> 0.0, objects -> {}, everything else -> ""."""
+    path = os.path.join(semantic_model_source, INSIGHTS_MODEL_TABLE_FILE)
+    with open(path, encoding="utf-8") as fh:
+        tmdl = fh.read()
+    doc: dict[str, Any] = {}
+    # One block per source-backed column; calculated columns have no sourceColumn.
+    for block in re.split(r"\n\tcolumn ", tmdl)[1:]:
+        source = re.search(r"^\t\tsourceColumn: (.+)$", block, re.M)
+        if not source:
+            continue
+        column = source.group(1).strip()
+        if column.startswith("_"):
+            continue  # Cosmos system properties (_rid, _ts) are always present
+        data_type = (re.search(r"^\t\tdataType: (\w+)$", block, re.M) or [None, "string"])[1]
+        if column in SCHEMA_SEED_OBJECT_COLUMNS:
+            doc[column] = {}
+        elif data_type in ("double", "int64", "decimal"):
+            doc[column] = 0.0
+        else:
+            doc[column] = ""
+    doc.update({
+        "id": SCHEMA_SEED_ID,
+        "tenantId": SCHEMA_SEED_TENANT,
+        "type": SCHEMA_SEED_TYPE,
+        "note": "Placeholder written by provision_fabric.py so the mirrored table has its "
+                "full schema before the Power BI report is deployed. Safe to leave in place.",
+    })
+    return doc
+
+
+def seed_insights_schema(cosmos_endpoint: str, db_name: str, semantic_model_source: str,
+                         timeout: int = 300) -> bool:
+    """Upsert the OptimizationInsights placeholder (idempotent). Retries 403s while a
+    freshly-assigned Cosmos data-plane role propagates. Returns True on success."""
+    try:
+        from azure.cosmos import CosmosClient
+        from azure.cosmos.exceptions import CosmosHttpResponseError
+    except ImportError:
+        log("WARNING: azure-cosmos is not installed; skipping the OptimizationInsights "
+            "schema seed (pip install azure-cosmos)")
+        return False
+    doc = _insights_seed_document(semantic_model_source)
+    container = (
+        CosmosClient(cosmos_endpoint, credential=DefaultAzureCredential())
+        .get_database_client(db_name)
+        .get_container_client(INSIGHTS_CONTAINER)
+    )
+    deadline = time.time() + timeout
+    while True:
+        try:
+            container.upsert_item(doc)
+            log(f"seeded {INSIGHTS_CONTAINER} schema placeholder ({len(doc)} fields)")
+            return True
+        except CosmosHttpResponseError as e:
+            if e.status_code == 403 and time.time() < deadline:
+                log("Cosmos write not authorized yet (role assignment propagating); retrying...")
+                time.sleep(20)
+                continue
+            log(f"WARNING: could not seed the {INSIGHTS_CONTAINER} schema placeholder: "
+                f"{e.status_code} {str(e)[:300]}")
+            return False
+
+
+def wait_for_insights_schema(tok: Tokens, ws_id: str, mid: str, timeout: int = 900) -> bool:
+    """Wait until the mirror has replicated at least one OptimizationInsights row, then sync
+    the SQL analytics endpoint's metadata so the new columns are visible to Power BI."""
+    hdr = tok.headers(FABRIC_SCOPE)
+    base = f"{FABRIC_API}/workspaces/{ws_id}/mirroredDatabases/{mid}"
+    deadline = time.time() + timeout
+    while True:
+        tables = (req("POST", f"{base}/getTablesMirroringStatus", hdr, json_body={}, ok=(200,))
+                  .json() or {}).get("data", [])
+        row = next((t for t in tables if t.get("sourceTableName") == INSIGHTS_CONTAINER), {})
+        processed = (row.get("metrics") or {}).get("processedRows") or 0
+        if processed >= 1:
+            break
+        if time.time() >= deadline:
+            log(f"WARNING: {INSIGHTS_CONTAINER} not replicated after {timeout}s "
+                f"(status={row.get('status')}); the report may cache an empty schema")
+            return False
+        log(f"waiting for the mirror to replicate {INSIGHTS_CONTAINER} "
+            f"(status={row.get('status')}, rows={processed})...")
+        time.sleep(20)
+
+    mirror_name = req("GET", base, hdr).json().get("displayName")
+    endpoints = req("GET", f"{FABRIC_API}/workspaces/{ws_id}/sqlEndpoints", hdr).json().get("value", [])
+    sql_ep_id = next((e["id"] for e in endpoints if e.get("displayName") == mirror_name), None)
+    if not sql_ep_id:
+        log("WARNING: mirror SQL endpoint not found; skipping its metadata sync")
+        return True
+    r = req("POST", f"{FABRIC_API}/workspaces/{ws_id}/sqlEndpoints/{sql_ep_id}/refreshMetadata",
+            hdr, json_body={}, ok=(200, 202))
+    poll_lro(r, hdr)
+    log(f"{INSIGHTS_CONTAINER} replicated; SQL endpoint metadata synced")
+    return True
+
+
+def ensure_insights_schema(tok: Tokens, ws_id: str, mid: str, cfg: dict[str, str],
+                           semantic_model_source: str) -> None:
+    """Seed + wait before any Power BI deployment. Never fails provisioning: on error it
+    logs how to recover instead."""
+    try:
+        if seed_insights_schema(cfg["cosmos_endpoint"], cfg["db_name"], semantic_model_source):
+            wait_for_insights_schema(tok, ws_id, mid)
+    except Exception as e:  # noqa: BLE001
+        log(f"WARNING: {INSIGHTS_CONTAINER} schema preparation failed: {e}")
+        log("  If report visuals later fail with \"Invalid column name 'type'\": once the "
+            "Module 09 notebook has filled the table, change the text of the OptimizationInsights "
+            "partition query in the TMDL (Power BI caches its schema by query text) and "
+            "re-run this script with -Phase 3.")
+
+
 def upload_notebook(tok: Tokens, ws_id: str, nb_path: str, params: dict[str, str]) -> Optional[str]:
     hdr = tok.headers(FABRIC_SCOPE)
     if not os.path.exists(nb_path):
@@ -1030,6 +1160,7 @@ def main() -> None:
             die("phase 'report' needs FABRIC_WORKSPACE_ID and FABRIC_MIRROR_ID in the azd "
                 "env (run phases 1-2 first)")
         sql_ep = get_mirror_sql_endpoint(tok, ws_id, mirror_id)
+        ensure_insights_schema(tok, ws_id, mirror_id, cfg, args.semantic_model_source)
         report_path = args.pbit or args.report
         if report_path:
             imported = import_report(
@@ -1141,6 +1272,7 @@ def main() -> None:
         return
 
     # ---- Phase 3 (deploy the source-controlled Power BI report/model) ----
+    ensure_insights_schema(tok, ws_id, mirror_id, cfg, args.semantic_model_source)
     report_path = args.pbit or args.report
     if report_path:
         imported = import_report(

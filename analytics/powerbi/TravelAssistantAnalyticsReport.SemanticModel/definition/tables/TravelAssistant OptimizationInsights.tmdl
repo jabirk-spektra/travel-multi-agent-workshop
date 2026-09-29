@@ -1081,8 +1081,11 @@ table 'TravelAssistant OptimizationInsights'
 		source =
 				let
 				    Source = Sql.Database(MirrorSQLEndpoint, MirrorDatabase),
-				    TravelAssistant_OptimizationInsights = Source{[Schema="TravelAssistant",Item="OptimizationInsights"]}[Data]
+				    TravelAssistant_OptimizationInsights = Source{[Schema="TravelAssistant",Item="OptimizationInsights"]}[Data],
+				    // No-op step: changes the query text so the service re-reads this table's schema
+				    // instead of reusing one cached while the mirror table was still empty (_rid/_ts only).
+				    Insights = Table.SelectRows(TravelAssistant_OptimizationInsights, each true)
 				in
-				    TravelAssistant_OptimizationInsights
+				    Insights
 
 	annotation PBI_ResultType = Table

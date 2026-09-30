@@ -42,6 +42,8 @@
     1   = workspace + identity + RBAC only (stop before the mirror)
     2   = workspace + identity + RBAC, mirror, notebook, and UDF (stop before report deployment)
     3   = deploy and validate only the Power BI semantic model + report
+    refresh = only recalculate the semantic model's calculated tables (fixes visuals that say
+          a calculated table "needs to be recalculated or refreshed")
     all = Phase 1, the connection step, mirror + notebook + UDF, then Power BI deployment (default)
 
 .EXAMPLE
@@ -59,7 +61,7 @@ param(
     [string]$WorkspaceName,
     [string]$ConnectionId,
     [switch]$Solution,
-    [ValidateSet('1', '2', '3', 'all')]
+    [ValidateSet('1', '2', '3', 'refresh', 'all')]
     [string]$Phase = 'all'
 )
 
@@ -184,6 +186,15 @@ function Invoke-Provision([string[]]$extraArgs) {
     finally {
         Pop-Location
     }
+}
+
+# --- Semantic model refresh only ---------------------------------------------
+if ($Phase -eq 'refresh') {
+    Write-Section 'Refresh - recalculate the semantic model''s calculated tables'
+    Invoke-Provision @('--phase', 'refresh')
+    if ($script:provisionExit -ne 0) { Fail "Semantic model refresh failed (exit $script:provisionExit). See the output above." }
+    Write-Host 'Semantic model refreshed.' -ForegroundColor Green
+    exit 0
 }
 
 # --- Phase 3 only -------------------------------------------------------------

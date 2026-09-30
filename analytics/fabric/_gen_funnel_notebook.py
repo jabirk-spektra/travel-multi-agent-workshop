@@ -768,7 +768,12 @@ if "type" in governance.columns:
                 _slo[_key] = _slo_doc[_key]
 
 _disc_rows, _agent_opp_rows, _rec_rows = [], [], []
-_total_spend = sum(float(_n.get("cost") or 0.0) for _n in nodes)
+# Total node-grain spend the opportunities are measured against (the app-plane's
+# _total_cost(nodes)). Reuses the NodeExecutions rows 5d already flattened into `_nodes`.
+_total_spend = sum(
+    (_nd["input_tokens"] * _price_map.get(_nd["model_deployment"], (b_in, b_out))[0]
+     + _nd["output_tokens"] * _price_map.get(_nd["model_deployment"], (b_in, b_out))[1]) / 1e6
+    for _nd in _nodes)
 for _rank, _det in enumerate(_detections):
     _norm, _why = _guardrail(_propose(_det), _det["engine_saving"])
     if _norm is None:                          # a bad LLM proposal -> fall back and guardrail that
@@ -796,7 +801,7 @@ for _rank, _det in enumerate(_detections):
          f"{_norm['seam']} \\u2192 {_norm['target']}", float(_norm["saving"]), round(_effect_pct, 2),
          "Automatic" if _norm["apply_mode"] == "auto" else "Manual",
          _norm["autonomy_ceiling"], "\\u2713" if _effect_pct / 100 >= float(_slo["min_effect"]) else "\\u00d7",
-         _display_state, now))
+         _display_state, round(_total_spend, 6), now))
     _card_obj = {"scenario": _det["scenario"], "scenario_id": _det["scenario"], "title": _det["title"],
                  "dimension": _norm["dimension"], "apply_mode": _norm["apply_mode"],
                  "maturity": "discovered by the LLM analyst (engine-guardrailed)",
@@ -817,7 +822,15 @@ disc_df = spark.createDataFrame(
 agent_opp_df = spark.createDataFrame(
     _agent_opp_rows,
     ["id", "type", "tenantId", "order", "note", "saving_usd", "saving_pct", "apply_mode",
-     "maturity", "method", "status", "computed_at"])
+     "maturity", "method", "status", "baseline_cost_usd", "computed_at"])
+
+# The SLO policy row the report's SLO measures read (type = "slo_policy"), projected onto
+# existing OptimizationInsights columns exactly as the app-plane build_agent_opportunity_rows does.
+slo_policy_df = spark.createDataFrame(
+    [(f"slo::{TENANT}", "slo_policy", TENANT, float(_slo["slo"]), float(_slo["min_confidence"]),
+      float(_slo["min_effect"]), str(_slo["by"]), now)],
+    ["id", "type", "tenantId", "baseline_cost_usd", "actual_cost_usd", "saving_usd", "method",
+     "computed_at"])
 
 _slo_rows = [
     (f"slometric::{TENANT}::1", "slo_metric", TENANT, 1, "1 \\u00b7 Quality gate (e2e_quality \\u2265)",
@@ -848,7 +861,7 @@ _rec_schema = StructType([
 ])
 rec_df = spark.createDataFrame(_rec_rows, _rec_schema)
 
-for _df in (disc_df, agent_opp_df, slo_df, rec_df):
+for _df in (disc_df, agent_opp_df, slo_df, slo_policy_df, rec_df):
     _df.write.format("cosmos.oltp").options(**cosmos_write).mode("append").save()
 print(f"Analyst reverse-ETL complete -> {len(_disc_rows)} discovered_opportunity + "
       f"{len(_agent_opp_rows)} agent_opportunity + {len(_slo_rows)} slo_metric + "

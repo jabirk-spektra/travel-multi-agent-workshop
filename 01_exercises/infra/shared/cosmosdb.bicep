@@ -15,6 +15,7 @@ param counterContainerName string = 'counter'
 param optimizationPoliciesContainerName string = 'OptimizationPolicies'
 param optimizationTurnsContainerName string = 'OptimizationTurns'
 param nodeExecutionsContainerName string = 'NodeExecutions'
+param optimizationGovernanceContainerName string = 'OptimizationGovernance'
 param optimizationInsightsContainerName string = 'OptimizationInsights'
 param configurationContainerName string = 'Configuration'
 @description('Deploy the optional analytics/optimization containers (Modules 07/08 — OptimizationPolicies/Turns/Insights). Set false for a leaner base workshop that skips the analytics modules.')
@@ -904,6 +905,46 @@ resource cosmosContainerNodeExecutions 'Microsoft.DocumentDB/databaseAccounts/sq
       }
     }
       options: {
+      autoscaleSettings: {
+        maxThroughput: containerMaxRU
+      }
+    }
+  }
+  tags: tags
+}
+
+// Optimization Governance (append-only C1-C5 human-in-the-loop decision audit trail) — PK /tenantId
+// The Fabric mirror mounts this container and the Module 09 notebook reads its slo_policy docs,
+// so it must exist before provision_fabric.py creates the mirror.
+resource cosmosContainerOptimizationGovernance 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-12-01-preview' = if (deployAnalytics) {
+  parent: database
+  name: optimizationGovernanceContainerName
+  properties: {
+    resource: {
+      id: optimizationGovernanceContainerName
+      partitionKey: {
+        paths: [
+          '/tenantId'
+        ]
+        kind: 'Hash'
+        version: 2
+      }
+      indexingPolicy: {
+        indexingMode: 'consistent'
+        automatic: true
+        includedPaths: [
+          {
+            path: '/*'
+          }
+        ]
+        excludedPaths: [
+          {
+            path: '/"_etag"/?'
+          }
+        ]
+      }
+    }
+    options: {
       autoscaleSettings: {
         maxThroughput: containerMaxRU
       }

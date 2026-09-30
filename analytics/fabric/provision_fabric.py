@@ -1037,6 +1037,30 @@ def _refresh_calculated_tables(tok: Tokens, ws_id: str, ds_id: str, timeout: int
         time.sleep(10)
 
 
+def refresh_semantic_model(tok: Tokens, workspace_name: str) -> None:
+    """Recalculate the deployed report's calculated tables without redeploying anything.
+    Run this when visuals report a calculated table that "needs to be recalculated or
+    refreshed". IDs come from the azd env, falling back to a lookup by display name."""
+    env = load_azd_env()
+    hdr = tok.headers(FABRIC_SCOPE)
+    ws_id = env.get("FABRIC_WORKSPACE_ID", "")
+    if not ws_id:
+        workspaces = req("GET", f"{FABRIC_API}/workspaces", hdr).json().get("value", [])
+        ws_id = next((w["id"] for w in workspaces if w.get("displayName") == workspace_name), "")
+    if not ws_id:
+        die(f"workspace '{workspace_name}' not found (set FABRIC_WORKSPACE_ID or pass --workspace)")
+    ds_id = env.get("FABRIC_SEMANTIC_MODEL_ID", "")
+    if not ds_id:
+        models = req("GET", f"{FABRIC_API}/workspaces/{ws_id}/semanticModels", hdr).json().get("value", [])
+        ds_id = next((m["id"] for m in models if m.get("displayName") == "TravelAssistantAnalyticsReport"), "")
+    if not ds_id:
+        die(f"TravelAssistantAnalyticsReport semantic model not found in workspace {ws_id} "
+            "(deploy it with --phase report first)")
+    log(f"refreshing semantic model {ds_id} in workspace {ws_id}")
+    _refresh_calculated_tables(tok, ws_id, ds_id)
+    print(json.dumps({"workspaceId": ws_id, "semanticModelId": ds_id, "refresh": "Completed"}, indent=2))
+
+
 def _bind_directquery_sso(tok: Tokens, ws_id: str, ds_id: str) -> None:
     """Best-effort: configure the mirror SQL DirectQuery source for Entra SSO so the report
     queries live for each viewer. Same-tenant Fabric SQL endpoints usually bind
@@ -1160,15 +1184,21 @@ def main() -> None:
     p.add_argument("--semantic-model-source",
                    default=os.path.join(powerbi_dir, "TravelAssistantAnalyticsReport.SemanticModel"),
                    help="TMDL semantic-model definition directory")
-    p.add_argument("--phase", choices=["1", "2", "3", "report", "all"], default="all",
+    p.add_argument("--phase", choices=["1", "2", "3", "report", "refresh", "all"], default="all",
                    help="1=workspace+identity+rbac, 2=+mirror+notebook+udf, 3=all+report "
                         "deployment, report=ONLY deploy the report (reuses the persisted "
-                        "FABRIC_WORKSPACE_ID/FABRIC_MIRROR_ID)")
+                        "FABRIC_WORKSPACE_ID/FABRIC_MIRROR_ID), refresh=ONLY recalculate the "
+                        "semantic model's calculated tables")
     args = p.parse_args()
     if args.solution:
         base, ext = os.path.splitext(args.notebook)
         if not base.endswith("_solution"):
             args.notebook = f"{base}_solution{ext}"
+
+    # ---- refresh-only phase (needs no Cosmos/capacity config, just the deployed model) ----
+    if args.phase == "refresh":
+        refresh_semantic_model(Tokens(), args.workspace)
+        return
 
     cfg = resolve_config(args)
     missing = [k for k in ("rg", "sub", "capacity_name", "cosmos_account") if not cfg.get(k)]

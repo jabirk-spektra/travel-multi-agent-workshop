@@ -9,7 +9,9 @@ occasional confirmed trips) at a controllable rate with a realistic complexity-t
 the dashboards visibly change as it runs.
 
 Two modes:
-  --mode direct  (default): write OptimizationTurns docs straight to Cosmos.
+  --mode direct  (default): write OptimizationTurns docs (with agent_path) plus the
+                  matching per-agent NodeExecutions doc straight to Cosmos, so the
+                  agent-path and agent-scorecard analytics have data for the tenant.
                   Fast, no LLM cost, controllable rate. Best for the live demo.
   --mode app:     drive the real completion endpoint (real agent turns).
                   Realistic but slower and incurs model cost.
@@ -72,6 +74,14 @@ COMPLEXITY_PROFILES = [
 ]
 CITIES = ["Amsterdam", "Paris", "Tokyo", "Rome", "Barcelona", "London", "New York"]
 
+# Agents that run for a turn, by handoff count — the same agent_path shape the app
+# records (supervisor first, then each specialist it hands off to).
+AGENT_PATHS = {
+    0: ["supervisor"],
+    1: ["supervisor", "find_places"],
+    2: ["supervisor", "find_places", "create_or_update_itinerary"],
+}
+
 # The single premium model everything runs on in the pre-optimization baseline.
 DEFAULT_DEPLOYMENT = "gpt-5.1"
 DEFAULT_MODEL = "gpt-5.1-2025-11-13"
@@ -126,8 +136,38 @@ def _turn_doc(tenant: str, user: str, session: str, profile: dict, applied: bool
         "input_tokens": it, "output_tokens": ot, "total_tokens": it + ot,
         "cached_tokens": int(it * random.uniform(0.6, 0.9)),
         "handoff_count": profile["handoffs"],
+        "agent_path": ",".join(AGENT_PATHS[profile["handoffs"]]),
         "timeStamp": now.isoformat(),
         "turn_epoch": int(now.timestamp()),
+    }
+
+
+def _node_executions_doc(turn: dict) -> dict:
+    """The per-agent (node-grain) NodeExecutions doc for a simulated turn — the same
+    shape optimization.record_node_executions writes. The turn's tokens are split
+    across the agents on its agent_path so the node totals add up to the turn totals."""
+    agents = turn["agent_path"].split(",")
+    shares = [random.uniform(0.5, 1.5) for _ in agents]
+    scale = sum(shares)
+    node_execs = []
+    in_left, out_left, cached_left = turn["input_tokens"], turn["output_tokens"], turn["cached_tokens"]
+    for seq, (agent, share) in enumerate(zip(agents, shares)):
+        last = seq == len(agents) - 1
+        it = in_left if last else int(turn["input_tokens"] * share / scale)
+        ot = out_left if last else int(turn["output_tokens"] * share / scale)
+        ct = cached_left if last else min(int(turn["cached_tokens"] * share / scale), it)
+        in_left, out_left, cached_left = in_left - it, out_left - ot, cached_left - ct
+        node_execs.append({
+            "seq": seq, "agent": agent,
+            "model_deployment": turn["model_deployment"], "model_name": turn["model_name"],
+            "input_tokens": it, "output_tokens": ot, "total_tokens": it + ot, "cached_tokens": ct,
+        })
+    return {
+        "id": turn["id"],
+        "tenantId": turn["tenantId"], "userId": turn["userId"], "sessionId": turn["sessionId"],
+        "turnId": turn["id"], "debugLogId": turn["id"],
+        "nodeExecutions": node_execs, "nodeCount": len(node_execs),
+        "timeStamp": turn["timeStamp"], "turn_epoch": turn["turn_epoch"],
     }
 
 
@@ -156,6 +196,7 @@ def run_direct(args) -> None:
     db = CosmosClient(endpoint, DefaultAzureCredential()).get_database_client(db_name)
     turns = db.get_container_client("OptimizationTurns")
     trips = db.get_container_client("Trips")
+    node_executions = db.get_container_client("NodeExecutions")
     policies = db.get_container_client("OptimizationPolicies")
 
     interval = 60.0 / max(args.rate, 1)
@@ -191,7 +232,9 @@ def run_direct(args) -> None:
             if random.random() < 0.05:
                 sessions[user] = f"sess-{uuid.uuid4().hex[:8]}"
             profile = _pick_complexity_profile()
-            turns.upsert_item(_turn_doc(args.tenant, user, sessions[user], profile, applied))
+            turn = _turn_doc(args.tenant, user, sessions[user], profile, applied)
+            turns.upsert_item(turn)
+            node_executions.upsert_item(_node_executions_doc(turn))
             n_turns += 1
             # a complex turn sometimes results in a confirmed trip (an outcome)
             if profile["complexity_tier"] == "complex" and random.random() < 0.35:

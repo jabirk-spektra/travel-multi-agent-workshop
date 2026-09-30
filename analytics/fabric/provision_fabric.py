@@ -1008,8 +1008,33 @@ def import_report(tok: Tokens, ws_id: str, report_path: str, sql_endpoint: str, 
         log("no mirror SQL endpoint provided; leaving report parameters as saved")
 
     _bind_directquery_sso(tok, ws_id, ds_id)
+    _refresh_calculated_tables(tok, ws_id, ds_id)
     _verify_dataset(tok, ws_id, ds_id, _report_insights_entity(report_path))
     return True
+
+
+def _refresh_calculated_tables(tok: Tokens, ws_id: str, ds_id: str, timeout: int = 600) -> None:
+    """Recalculate the model's calculated tables (Turns per Day, Projection Volume,
+    Cost Comparison). A freshly deployed model holds no data for them until a refresh,
+    so every visual that uses them errors. The DirectQuery tables are unaffected."""
+    hdr = tok.headers(PBI_SCOPE)
+    url = f"{PBI_API}/groups/{ws_id}/datasets/{ds_id}/refreshes"
+    r = requests.post(url, headers=hdr, timeout=60,
+                      json={"type": "Calculate", "notifyOption": "NoNotification", "retryCount": 1})
+    if r.status_code != 202:
+        raise RuntimeError(f"calculated-table refresh failed to start {r.status_code}: {r.text[:600]}")
+    status_url = r.headers.get("Location") or f"{url}/{r.headers.get('x-ms-request-id', '')}"
+    deadline = time.time() + timeout
+    while True:
+        status = requests.get(status_url, headers=hdr, timeout=60).json().get("status")
+        if status == "Completed":
+            log("calculated tables refreshed")
+            return
+        if status in ("Failed", "Cancelled", "Disabled"):
+            raise RuntimeError(f"calculated-table refresh {status}: {status_url}")
+        if time.time() >= deadline:
+            raise RuntimeError(f"calculated-table refresh still {status} after {timeout}s")
+        time.sleep(10)
 
 
 def _bind_directquery_sso(tok: Tokens, ws_id: str, ds_id: str) -> None:
@@ -1065,7 +1090,9 @@ def _report_insights_entity(report_path: str) -> str:
 def _verify_dataset(tok: Tokens, ws_id: str, ds_id: str, entity: str = "") -> None:
     """Run a DAX query and fail unless the imported report can read the mirror."""
     hdr = tok.headers(PBI_SCOPE)
-    dax = f"EVALUATE ROW(\"rows\", COUNTROWS('{entity}'))" if entity else "EVALUATE {1}"
+    # 'Turns per Day' is a calculated table: querying it fails unless the refresh ran.
+    dax = (f"EVALUATE ROW(\"rows\", COUNTROWS('{entity}'), \"calc\", COUNTROWS('Turns per Day'))"
+           if entity else "EVALUATE ROW(\"calc\", COUNTROWS('Turns per Day'))")
     q = {"queries": [{"query": dax}], "serializerSettings": {"includeNulls": True}}
     r = requests.post(f"{PBI_API}/groups/{ws_id}/datasets/{ds_id}/executeQueries",
                       headers=hdr, json=q, timeout=90)
